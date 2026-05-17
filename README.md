@@ -1,498 +1,173 @@
-# Personal “Jarvis” Assistant — Project Overview
+# Dobby
+
+A personal AI assistant — chat interface, tool-using agent, memory, and voice. Modular monorepo foundation for a production-grade assistant product.
+
+## Monorepo structure
+
+```
+dobby/
+├── frontend/          # Next.js chat UI (WebSocket streaming)
+├── backend/           # FastAPI AI engine
+├── shared/            # TypeScript contracts (@dobby/shared)
+├── tools/             # Pluggable tool system (Python)
+├── memory/            # PostgreSQL memory layer (Python)
+├── voice/             # STT/TTS & automation stubs (Python)
+├── docker-compose.yml # PostgreSQL for local dev
+└── IDEA.md            # Product vision & roadmap
+```
+
+## Architecture
+
+```
+User → Next.js (WebSocket) → FastAPI → Agent loop → LLM
+                                    ↓
+                              Tool registry (get_time, mock_calendar, mock_spotify)
+                                    ↓
+                              PostgreSQL memory (messages + user key-value)
+                                    ↓
+                              Streamed tokens → UI
+```
+
+- **Modular monolith backend** — one FastAPI process, clear package boundaries
+- **Pluggable tools** — register tools via `dobby_tools`
+- **Replaceable memory** — `MemoryStore` interface; vector DB placeholder only
+- **Swappable LLM** — OpenAI-compatible wrapper (mock mode without API key)
+
+## Prerequisites
+
+- Node.js 20+ (npm 10+)
+- Python 3.11+
+- Docker (for PostgreSQL)
+
+## Quick start
+
+### 1. Database
+
+```bash
+docker compose up -d postgres
+```
+
+Postgres listens on **port 5433** (not 5432) so it does not clash with a local Homebrew Postgres install.
+
+### 2. Backend
 
-## Vision
+```bash
+cd backend
+python -m venv .venv
+source .venv/bin/activate   # Windows: .venv\Scripts\activate
+pip install -r requirements.txt
+cp .env.example .env
+# Optional: set OPENAI_API_KEY for live LLM responses (mock works without it)
+uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
+```
 
-Build a personal AI assistant called Dobby inspired by JARVIS from Iron Man.
+### 3. Frontend
 
-The goal is NOT to create AGI or a fully autonomous sci-fi AI.
+```bash
+npm install
+npm run build -w @dobby/shared
+cp frontend/.env.example frontend/.env.local
+npm run dev -w @dobby/frontend
+```
+
+Open [http://localhost:3000](http://localhost:3000).
+
+### Run both (from repo root)
+
+```bash
+npm install
+npm run db:up
+# Terminal 1: backend (see above)
+# Terminal 2:
+npm run dev:frontend
+```
+
+## MVP checklist
+
+1. Start backend (`uvicorn` on port 8000)
+2. Start frontend (`next dev` on port 3000)
+3. Send a chat message
+4. Receive streamed AI response over WebSocket
+5. Messages persisted in PostgreSQL
+
+## API overview
+
+| Endpoint | Description |
+|----------|-------------|
+| `GET /api/health` | Health check |
+| `POST /api/chat` | Non-streaming chat |
+| `POST /api/chat/conversations` | Create conversation |
+| `GET /api/memory/messages/{id}` | Recent messages |
+| `POST /api/memory/user` | Save user memory (key-value) |
+| `GET /api/tools` | List registered tools |
+| `POST /api/voice/transcribe` | Speech-to-text (multipart audio) |
+| `POST /api/voice/synthesize` | Text-to-speech (returns MP3) |
+| `WS /api/ws/chat` | Streaming chat (primary UI path) |
 
-The realistic goal is:
+### WebSocket protocol
 
-> An AI-powered operating layer over your digital life.
+**Client → server**
 
-The assistant should:
-- Talk naturally
-- Remember context
-- Use tools
-- Control apps/services
-- Automate workflows
-- Help manage life/projects/tasks
-- Eventually become proactive
+```json
+{ "type": "chat", "conversation_id": "optional-uuid", "content": "Hello" }
+```
 
----
+**Server → client**
 
-# What Makes a Real “Jarvis”
+- `{ "type": "conversation", "conversation_id": "..." }`
+- `{ "type": "token", "content": "..." }`
+- `{ "type": "tool_call", "call": { ... } }`
+- `{ "type": "tool_result", "result": { ... } }`
+- `{ "type": "done", "message_id": "..." }`
+- `{ "type": "error", "message": "..." }`
 
-A true Jarvis-style system is NOT one model.
+## Environment
 
-It is a combination of:
+- `backend/.env.example` — database, OpenAI, CORS
+- `frontend/.env.example` — API and WebSocket URLs
 
-- LLM (reasoning)
-- Memory system
-- Tool/action framework
-- Voice system
-- Automation layer
-- UI layer
-- Context system
+## Voice (Phase 2 + 2.5 sprint)
 
-The “magic” comes from:
-- low latency
-- personalization
-- persistent memory
-- integrations
-- proactive behavior
+Requires `OPENAI_API_KEY` (Whisper + TTS use the same key).
 
-NOT from:
-- giant UIs
-- holograms
-- fancy animations
+| Feature | How |
+|---------|-----|
+| **Hold to speak** | Default — hold mic, release to transcribe |
+| **Tap + auto-stop** | Settings → Tap mode — tap mic, pause speaking to stop (VAD); tap again to cancel |
+| **Auto-send voice** | Settings → sends transcript immediately (default off) |
+| **Speak replies** | Status bar toggle — TTS plays per sentence while the reply streams |
+| **Replay** | Replay button under each assistant message |
 
----
+Env (optional, see `backend/.env.example`):
 
-# Recommended Overall Architecture
+```
+VOICE_STT_MODEL=whisper-1
+VOICE_TTS_MODEL=tts-1
+VOICE_TTS_VOICE=alloy
+```
 
-## Core Architecture
+**Mic permission:** Browser will prompt for microphone access. Production requires **HTTPS**. Tap mode downloads a small VAD model on first use.
 
-### 1. AI Brain
-Responsible for:
-- reasoning
-- conversation
-- planning
-- tool orchestration
+**Further voice work:** [docs/PHASE_2_5.md](./docs/PHASE_2_5.md) (ElevenLabs, local Whisper, wake word)
 
-Recommended:
-- OpenAI API initially
-- Possibly local models later
+## User profile memory keys
 
----
+Saved via **Settings** in the UI or `POST /api/memory/user`. Injected into the system prompt:
 
-### 2. Memory System
-Stores:
-- preferences
-- routines
-- projects
-- people
-- goals
-- summaries
+| Key | Purpose |
+|-----|---------|
+| `profile.name` | User's name |
+| `profile.timezone` | IANA timezone (e.g. `Europe/London`) |
+| `profile.preferences` | Free-text preferences and context |
 
-Initially:
-- PostgreSQL only
+## Roadmap
 
-Later:
-- vector database if needed
+- [x] Voice: OpenAI Whisper STT + TTS, hold/tap input, auto-send, streaming TTS, replay
+- [ ] Voice 2.5+ — see [docs/PHASE_2_5.md](./docs/PHASE_2_5.md)
+- [ ] Real calendar, Spotify, tasks integrations
+- [ ] Vector memory (interface stub in `memory/`)
+- [ ] Playwright browser automation (`voice/dobby_voice/automation.py`)
+- [ ] Proactive scheduling & notifications
+- [ ] Mobile / desktop clients
 
----
-
-### 3. Tool System
-The MOST important part.
-
-Without tools:
-- it is just a chatbot
-
-With tools:
-- it becomes an operator
-
-Examples:
-- Calendar
-- Tasks
-- Spotify
-- Browser actions
-- Email
-- GitHub
-- Notion
-- Smart home
-
----
-
-### 4. Voice System
-Adds the “Jarvis feel”.
-
-Components:
-- speech-to-text
-- text-to-speech
-
-Recommended:
-- Whisper for STT
-- ElevenLabs/OpenAI for TTS
-
-Low latency matters more than realism.
-
----
-
-### 5. Automation Layer
-Allows actual action execution.
-
-Examples:
-- browser automation
-- desktop control
-- file manipulation
-- scripts
-
-Tools:
-- Playwright
-- PyAutoGUI
-
----
-
-### 6. User Interfaces
-
-The ideal setup is:
-
-#### Web App
-Main dashboard + brain interface
-
-#### Mobile App
-Voice assistant + notifications
-
-#### Desktop Agent
-System control + automation
-
----
-
-# Platform Strategy
-
-## Best Starting Point: Web App
-
-Why:
-- easiest to build
-- fastest iteration
-- easiest AI integration
-- easiest debugging
-- cross-platform immediately
-
-Recommended:
-- Next.js frontend
-- FastAPI backend
-
----
-
-# Mobile Role
-
-Mobile should become:
-- the companion interface
-- voice interface
-- notification layer
-
-NOT the main system initially.
-
-Reasons:
-- mobile OS limitations
-- restricted automation
-- limited background execution
-
-Recommended:
-- React Native + Expo
-
----
-
-# Desktop Role
-
-Desktop integration is required for:
-- app control
-- file access
-- browser automation
-- workflow execution
-- terminal access
-
-This is what makes it feel like a real operator.
-
-Recommended:
-- Electron or Tauri
-- Python automation layer
-
----
-
-# Recommended Tech Stack
-
-## Frontend
-- React
-- Next.js
-
-## Mobile
-- React Native
-- Expo
-
-## Backend
-- Python
-- FastAPI
-
-## Database
-- PostgreSQL
-
-## AI Orchestration
-- PydanticAI
-OR
-- LangGraph
-
-## Voice
-- Whisper
-- ElevenLabs/OpenAI TTS
-
-## Automation
-- Playwright
-- PyAutoGUI
-
-## Realtime
-- WebSockets
-
----
-
-# Development Roadmap
-
-# Phase 1 — Core Brain (Most Important)
-
-Goal:
-Build something that already feels alive.
-
-## Features
-- Chat interface
-- Streaming responses
-- Conversation history
-- Persistent memory
-- User profile/preferences
-
-## Stack
-- Next.js
-- FastAPI
-- PostgreSQL
-- OpenAI API
-
----
-
-# Phase 2 — Voice
-
-Goal:
-Make interaction natural.
-
-## Features
-- speech-to-text
-- text-to-speech
-- voice conversation
-- push-to-talk
-- wake button
-
-Important:
-Voice dramatically increases the “Jarvis feeling”.
-
----
-
-# Phase 3 — Tool Use
-
-Goal:
-Move beyond chatbot behavior.
-
-## First Tools
-- calendar
-- tasks
-- weather
-- Spotify
-- web search
-
-At this stage:
-the assistant becomes useful.
-
----
-
-# Phase 4 — Automation
-
-Goal:
-Allow the assistant to act.
-
-## Features
-- browser automation
-- desktop actions
-- workflow execution
-- app control
-
-Tools:
-- Playwright
-- PyAutoGUI
-
----
-
-# Phase 5 — Proactive Intelligence
-
-Goal:
-Make the assistant feel personal.
-
-## Features
-- reminders
-- prioritization
-- habit learning
-- proactive suggestions
-- daily briefings
-
-Example:
-“Jarvis, what should I focus on today?”
-
-Assistant:
-- checks calendar
-- summarizes messages
-- reviews tasks
-- highlights priorities
-- reminds about projects
-
-This is a major milestone.
-
----
-
-# What NOT To Do Early
-
-## Avoid Multi-Agent Systems
-Do NOT start with:
-- planner agents
-- reflection agents
-- evaluator agents
-- swarm systems
-
-Huge overengineering trap.
-
-Start simple.
-
----
-
-## Avoid Local AI First
-Cloud APIs are better initially.
-
-Local models can come later for:
-- privacy
-- offline mode
-- lower cost
-
----
-
-## Avoid Smart Home First
-Cool demo.
-Bad foundation.
-
-Focus on:
-- digital workflows first
-
----
-
-## Avoid Full Autonomy
-Do NOT try to create:
-- fully independent AI
-
-Instead build:
-- highly capable copilot
-
-Human-supervised autonomy is the realistic target.
-
----
-
-# Biggest Technical Challenges
-
-## 1. Reliability
-Agents can:
-- hallucinate
-- misunderstand intent
-- perform wrong actions
-
-This is the hardest real-world issue.
-
----
-
-## 2. Context Management
-Long-term memory is difficult.
-
-Need:
-- summarization
-- retrieval
-- prioritization
-
----
-
-## 3. Latency
-Fast responses are critical.
-
-A slower smarter assistant often feels worse than:
-- a fast responsive one
-
----
-
-## 4. Cost
-Continuous AI processing can become expensive.
-
-Especially:
-- voice
-- vision
-- large models
-
----
-
-# MVP Definition
-
-A realistic MVP should:
-
-## Core Features
-- chat UI
-- persistent memory
-- voice interaction
-- calendar/tasks integration
-- Spotify control
-- web search
-- simple automation
-
-If this works well:
-it already feels futuristic.
-
----
-
-# Most Important Insight
-
-The “Jarvis feeling” comes from:
-
-- memory
-- responsiveness
-- integrations
-- voice
-- personalization
-- action-taking
-
-NOT from:
-- AGI
-- giant architectures
-- visual complexity
-
-A simple but highly integrated assistant is more impressive than a complicated but disconnected one.
-
----
-
-# Final Recommended Build Order
-
-## Step 1
-Web app
-
-## Step 2
-Memory system
-
-## Step 3
-Voice support
-
-## Step 4
-Tool integrations
-
-## Step 5
-Automation layer
-
-## Step 6
-Mobile companion app
-
-## Step 7
-Desktop operator agent
-
-## Step 8
-Proactive intelligence
-
----
-
-# Core Philosophy
-
-Do NOT build:
-> “A sentient AI.”
-
-Build:
-> “An intelligent operating layer for your life.”
-
-That is achievable today.
+See [IDEA.md](./IDEA.md) for full product vision.

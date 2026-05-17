@@ -1,0 +1,21 @@
+{
+  "name": "dobby",
+  "private": true,
+  "version": "0.1.0",
+  "description": "Dobby — personal AI assistant monorepo",
+  "workspaces": [
+    "shared",
+    "frontend"
+  ],
+  "scripts": {
+    "build": "npm run build -w @dobby/shared && npm run build -w @dobby/frontend",
+    "dev:frontend": "npm run dev -w @dobby/frontend",
+    "clean:frontend": "npm run clean -w @dobby/frontend",
+    "dev:backend": "cd backend && uvicorn app.main:app --reload --host 0.0.0.0 --port 8000",
+    "db:up": "docker compose up -d postgres",
+    "db:down": "docker compose down"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}

@@ -1,0 +1,17 @@
+[project]
+name = "dobby-voice"
+version = "0.1.0"
+description = "Voice interface stubs for Dobby (STT/TTS)"
+requires-python = ">=3.11"
+dependencies = [
+    "pydantic>=2.0",
+    "openai>=1.55.0",
+]
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["dobby_voice*"]
